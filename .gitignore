@@ -1,0 +1,52 @@
+# ========================
+# T.E.M.P.E.S.T. .gitignore
+# ========================
+
+# Ignore system files
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Ignore PowerShell cache and logs
+*.ps1xml
+*.psc1
+*.psm1
+*.cache
+*.log
+
+# Ignore local environment and VSCode config (user-specific)
+.vscode/
+.vscode-test/
+*.code-workspace
+
+# Ignore generated reports
+examples/sample-output/
+output/
+out/
+reports/
+*.csv
+*.json
+*.html
+
+# Ignore test results
+TestResults/
+coverage/
+*.coverage
+*.trx
+
+# Ignore Python or node leftovers (if used for testing)
+__pycache__/
+node_modules/
+dist/
+build/
+
+# Ignore archives and zips
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz
+
+# Ignore OS-specific metadata
+ehthumbs.db
+Icon?
