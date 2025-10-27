@@ -10,7 +10,7 @@ function Invoke-Tempest {
         [string[]]$Include
     )
 
-    Write-Host "`n🛰️  Initializing T.E.M.P.E.S.T. enumeration..." -ForegroundColor Cyan
+    Write-Host "`n[INFO]  Initializing T.E.M.P.E.S.T. enumeration..." -ForegroundColor Cyan
 
     # Ensure output directory exists
     if (!(Test-Path $OutDir)) {
@@ -61,7 +61,7 @@ function Invoke-Tempest {
     }
 
     $timer.Stop()
-    Write-Host ("`n✅ Enumeration completed in {0}s" -f [math]::Round($timer.Elapsed.TotalSeconds,2)) -ForegroundColor Cyan
+    Write-Host ("`n[SUCCESS] Enumeration completed in {0}s" -f [math]::Round($timer.Elapsed.TotalSeconds,2)) -ForegroundColor Cyan
 
     # Export section
     Write-Host "[+] Exporting results..." -ForegroundColor Magenta

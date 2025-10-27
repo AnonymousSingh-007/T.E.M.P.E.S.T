@@ -2,19 +2,6 @@ function Get-HostSummary {
     <#
     .SYNOPSIS
         Gathers high-level system information.
-
-    .DESCRIPTION
-        Collects key system metadata like hostname, OS, uptime, architecture, and current user.
-
-    .OUTPUTS
-        [PSCustomObject] with:
-        - ComputerName
-        - OS
-        - Version
-        - Architecture
-        - Uptime
-        - User
-        - Domain
     #>
 
     [CmdletBinding()]
@@ -22,10 +9,10 @@ function Get-HostSummary {
 
     Write-Verbose "[+] Gathering host summary information..."
 
-    $os = Get-CimInstance Win32_OperatingSystem
+    $os  = Get-CimInstance Win32_OperatingSystem
     $sys = Get-CimInstance Win32_ComputerSystem
 
-    [PSCustomObject]@{
+    $info = [PSCustomObject]@{
         ComputerName = $env:COMPUTERNAME
         OS           = $os.Caption
         Version      = $os.Version
@@ -34,4 +21,6 @@ function Get-HostSummary {
         User         = $env:USERNAME
         Domain       = $sys.Domain
     }
+
+    ,$info  
 }
