@@ -1,8 +1,8 @@
 # 🛡️ Security Policy — T.E.M.P.E.S.T.
 
 **Project:** T.E.M.P.E.S.T. — Threat-surface Enumeration: Modules, Ports, Extensions, Schedules & Tasks  
-**Maintainer:** [Your Name or Org]  
-**Repository:** https://github.com/<your-username>/tempest  
+**Maintainer:** AnonymousSingh-007  
+**Repository:** https://github.com/AnonymousSingh-007/tempest  
 
 ---
 
@@ -13,17 +13,13 @@ We currently support the latest release branch of T.E.M.P.E.S.T.
 | Version | Supported |
 |----------|------------|
 | main     | ✅ Active |
-| dev/*    | ⚙️ Development only |
-| legacy/* | ❌ Not supported |
 
 ---
 
 ## 📣 Reporting a Vulnerability
 
 If you discover a vulnerability, **please do not create a public GitHub issue**.  
-Instead, report it confidentially via email:
-
-📧 **security@yourdomain.com**
+Instead, report it confidentially via Linkdin profile tagged in profile section
 
 Include the following:
 - Detailed description of the vulnerability  
@@ -36,7 +32,7 @@ Include the following:
 
 ## 🎯 Response Process
 
-1. Acknowledge your report within **72 hours**.  
+1. Acknowledge your report within **96 hours**.  
 2. Reproduce and validate the finding.  
 3. Develop and test a fix.  
 4. Release a patch (and advisory) within a reasonable time frame.  
