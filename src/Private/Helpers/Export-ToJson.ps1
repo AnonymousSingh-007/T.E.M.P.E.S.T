@@ -1,14 +1,30 @@
 function Export-ToJson {
     <#
     .SYNOPSIS
-        Exports a PowerShell object to JSON file (UTF-8).
+        Streams a PowerShell object to a JSON file efficiently, without using excessive memory.
+
+    .DESCRIPTION
+        Instead of building one huge in-memory JSON string, this version writes JSON progressively.
+        Works well for large nested objects like T.E.M.P.E.S.T. results.
+
+    .PARAMETER Data
+        The PowerShell object to export (hashtable or dictionary of category arrays).
+
+    .PARAMETER OutFile
+        Path to the JSON file to write.
+
+    .PARAMETER Depth
+        Optional, ignored here (for compatibility with older calls).
+
+    .OUTPUTS
+        Path to the written JSON file.
     #>
 
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)] $Data,
-        [Parameter(Mandatory = $true)] [string]$OutFile,
-        [int]$Depth = 8
+        [Parameter(Mandatory = $true)] [string] $OutFile,
+        [int] $Depth = 5
     )
 
     try {
@@ -17,21 +33,36 @@ function Export-ToJson {
             New-Item -ItemType Directory -Path $dir | Out-Null
         }
 
-        # Stream-write JSON to avoid memory overload
-        $fileStream = [System.IO.StreamWriter]::new($OutFile, $false, [System.Text.UTF8Encoding]::new($false))
-        try {
-            $json = $Data | ConvertTo-Json -Depth $Depth -Compress
-            $fileStream.Write($json)
-        }
-        finally {
-            $fileStream.Close()
+        # Start JSON stream
+        $file = [System.IO.StreamWriter]::new($OutFile, $false, [System.Text.Encoding]::UTF8)
+        $file.WriteLine('{')
+
+        $keys = $Data.Keys
+        $lastIndex = $keys.Count - 1
+        $i = 0
+
+        foreach ($key in $keys) {
+            $file.Write("  `"$key`": ")
+
+            # Each dataset converted individually to reduce memory
+            $chunk = $Data[$key] | ConvertTo-Json -Depth 4 -Compress
+            $file.Write($chunk)
+
+            if ($i -lt $lastIndex) {
+                $file.Write(',')
+            }
+            $file.WriteLine()
+            $i++
         }
 
-        Write-Host "    [OK] JSON exported to $OutFile" -ForegroundColor Green
-        return (Resolve-Path $OutFile)
+        $file.WriteLine('}')
+        $file.Close()
+
+        Write-Host "    [OK] JSON report saved: $OutFile" -ForegroundColor Green
+        return (Get-Item -LiteralPath $OutFile).FullName
     }
     catch {
-        Write-Warning ("[!] Export-ToJson failed: {0}" -f $_)
+        Write-Warning "[!] Export-ToJson failed: $_"
         return $null
     }
 }
