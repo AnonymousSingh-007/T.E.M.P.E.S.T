@@ -52,16 +52,6 @@ Open PowerShell as Administrator (recommended) and run:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\src\Public\Invoke-Tempest.ps1 -OutDir .\examples\sample-output
 ```
 
-### Run with options
-
-```powershell
-# Skip HTML and CSV outputs
-pwsh -File .\src\Public\Invoke-Tempest.ps1 -OutDir C:\temp\tempest -NoHtml -NoCsv
-
-# Run without processes table (faster)
-pwsh -File .\src\Public\Invoke-Tempest.ps1 -OutDir .\out -IncludeProcesses:$false
-```
-
 Outputs will be written to the `-OutDir` folder:
 
 - `tempest_report_<HOSTNAME>.json` — full JSON report
@@ -93,9 +83,6 @@ tempest/
 │     ├─ Get-ScheduledTasks.ps1
 │     ├─ Get-Drivers.ps1
 │     └─ Get-BrowserExtensions.ps1
-├─ tests/                            # Pester unit & integration tests
-├─ examples/sample-output/           # sample outputs for README/demo
-├─ .github/workflows/ci-windows-pester.yml
 └─ README.md
 ```
 
@@ -133,9 +120,6 @@ Implement these as separate scorer functions so findings remain auditable and ex
 ### Run tasks from .vscode/tasks.json:
 
 - Run T.E.M.P.E.S.T. (Invoke-Tempest) — execute the tool
-- Run Pester Unit Tests — run unit tests under tests/unit
-
-**CI:** use `.github/workflows/ci-windows-pester.yml` (Windows runner) — lint with PSScriptAnalyzer and run Pester tests.
 
 ## Contributing — join the squad 🤝
 
@@ -146,7 +130,6 @@ We welcome contributions. Follow these rules of engagement:
 3. Lint with PSScriptAnalyzer and fix warnings where practical.
 4. Open a Pull Request describing the change, reason, and impact. Use the issue template for bugs/features.
 
-See CONTRIBUTING.md in repo for templates and release process.
 
 ## Security & responsible disclosure 🧯
 
