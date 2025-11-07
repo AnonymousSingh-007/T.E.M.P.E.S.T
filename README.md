@@ -40,7 +40,7 @@ This is intended for triage and posture review — not exploitation. 🧭
 ### Clone
 
 ```bash
-git clone https://github.com/<you>/tempest.git
+git clone https://github.com/AnonymousSingh-007/T.E.M.P.E.S.T.git
 cd tempest
 ```
 
