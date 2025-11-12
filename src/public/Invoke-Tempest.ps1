@@ -2,6 +2,7 @@ function Invoke-Tempest {
     <#
     .SYNOPSIS
         Launches the full T.E.M.P.E.S.T. local attack surface enumeration.
+        Includes ML-based port risk scoring via ports_risk_pipeline.py
     #>
 
     [CmdletBinding()]
@@ -82,33 +83,64 @@ function Invoke-Tempest {
     # ----------------------------
     Write-Host "[+] Exporting results..." -ForegroundColor Magenta
 
-    # JSON Export (index only to save memory)
     $jsonPath = Join-Path $OutDir "tempest_index.json"
     $jsonOut  = Export-ToJson -Data $results -OutFile $jsonPath -Depth 8
-
-    # CSV Export (flattened and combined)
-    $csvOuts = Export-ToCsv -Report $results -OutDir $OutDir -FlattenCombined
-
-    # HTML Dashboard (primary UI report)
-    $htmlOut = Build-HtmlReport -Report $results -OutFile (Join-Path $OutDir "dashboard.html") -Title "T.E.M.P.E.S.T. Report"
+    $csvOuts  = Export-ToCsv -Report $results -OutDir $OutDir -FlattenCombined
+    $htmlOut  = Build-HtmlReport -Report $results -OutFile (Join-Path $OutDir "dashboard.html") -Title "T.E.M.P.E.S.T. Report"
 
     # ----------------------------
-    # RUN PYTHON AI ANALYSIS
+    # RUN PYTHON AI ANALYSIS (fixed paths)
     # ----------------------------
-    Write-Host "[AI] Running intelligent post-analysis..." -ForegroundColor Cyan
-    $csvFile = Join-Path $OutDir "tempest_combined.csv"
+    Write-Host "[AI] Running intelligent post-analysis (port risk scoring)..." -ForegroundColor Cyan
 
-    if (Test-Path $csvFile) {
+    # Always resolve Ports.csv relative to the project root
+    $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+    $portsCsv = Join-Path $projectRoot "output\Ports.csv"
+
+    if (Test-Path $portsCsv) {
         try {
-            python ./analysis/analyze_tempest.py $csvFile
-            Write-Host "[AI] Analysis complete. See risk_dashboard.html" -ForegroundColor Green
+            $candidates = @(
+                (Join-Path $projectRoot "analysis\ports_risk_pipeline.py"),
+                (Join-Path $projectRoot "analysis\analyze_tempest.py")
+            )
+
+            $scriptPath = $candidates | Where-Object { Test-Path $_ -PathType Leaf } | Select-Object -First 1
+
+            if (-not $scriptPath) {
+                Write-Warning "[AI] Could not find ports_risk_pipeline.py in analysis folder."
+            }
+            else {
+                Write-Host "[AI] Using Python script: $scriptPath" -ForegroundColor Yellow
+                $analysisDir = Split-Path $scriptPath -Parent
+
+                Push-Location $analysisDir
+
+                # Ensure models directory exists
+                if (!(Test-Path ".\models")) {
+                    New-Item -ItemType Directory -Path ".\models" | Out-Null
+                }
+
+                # Train if model missing
+                if (!(Test-Path ".\models\ports_xgb.model")) {
+                    Write-Host "[AI] No trained model found. Training model first..." -ForegroundColor Yellow
+                    python $scriptPath train --data "$portsCsv"
+                }
+
+                Write-Host "[AI] Scoring ports with trained ML model..." -ForegroundColor Yellow
+                python $scriptPath score --data "$portsCsv"
+
+                Pop-Location
+
+                Write-Host "[AI] Port risk analysis complete. See Ports_with_risk.csv in output directory." -ForegroundColor Green
+            }
         }
         catch {
-            Write-Warning "[AI] Failed to run Python analysis: $_"
+            if (Get-Location | Out-Null) { Pop-Location }
+            Write-Warning "[AI] Failed to run Python ML analysis: $_"
         }
     }
     else {
-        Write-Warning "[AI] Skipping analysis -- no combined CSV found."
+        Write-Warning "[AI] Skipping ML analysis -- Ports.csv not found at $portsCsv"
     }
 
     # ----------------------------
@@ -118,7 +150,7 @@ function Invoke-Tempest {
     Write-Host "    $(Split-Path $jsonOut -Leaf)"
     foreach ($csv in $csvOuts) { Write-Host "    $(Split-Path $csv -Leaf)" }
     Write-Host "    $(Split-Path $htmlOut -Leaf)"
-    Write-Host "    risk_dashboard.html (if AI completed)"
+    Write-Host "    Ports_with_risk.csv (if AI completed)"
 
     return $results
 }
