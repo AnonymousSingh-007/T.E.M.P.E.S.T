@@ -2,7 +2,6 @@ function Invoke-Tempest {
     <#
     .SYNOPSIS
         Launches the full T.E.M.P.E.S.T. local attack surface enumeration.
-        Includes ML-based port + service risk scoring via Python pipelines.
     #>
 
     [CmdletBinding()]
@@ -11,52 +10,50 @@ function Invoke-Tempest {
         [string[]]$Include
     )
 
-    Write-Host "`n[INFO] Initializing T.E.M.P.E.S.T. enumeration..." -ForegroundColor Cyan
+    # Ensure UTF-8 output
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-    # Ensure output directory exists
+    Write-Host "`n[INFO] Initializing T.E.M.P.E.S.T. enumeration..." -ForegroundColor Cyan
+    Write-Host "[DEBUG] Output directory: $OutDir" -ForegroundColor DarkCyan
+
     if (!(Test-Path $OutDir)) {
         New-Item -ItemType Directory -Path $OutDir | Out-Null
     }
 
-    # ----------------------------
+    # -------------------------------------------------
     # Load Helpers and Private Modules
-    # ----------------------------
+    # -------------------------------------------------
     $helpersPath = Join-Path $PSScriptRoot "..\Private\Helpers"
     if (Test-Path $helpersPath) {
-        Get-ChildItem -Path $helpersPath -Filter "*.ps1" | ForEach-Object { . $_.FullName }
+        Get-ChildItem $helpersPath -Filter "*.ps1" | ForEach-Object { . $_.FullName }
     }
 
     $privatePath = Join-Path $PSScriptRoot "..\Private"
     if (Test-Path $privatePath) {
-        Get-ChildItem -Path $privatePath -Filter "Get-*.ps1" | ForEach-Object { . $_.FullName }
+        Get-ChildItem $privatePath -Filter "Get-*.ps1" | ForEach-Object { . $_.FullName }
     }
 
-    Write-Verbose "[+] Loaded Private modules from: $privatePath"
-    Write-Verbose "[+] Loaded Helper modules from: $helpersPath"
-
-    # ----------------------------
-    # Define Modules to Run
-    # ----------------------------
+    # -------------------------------------------------
+    # Modules
+    # -------------------------------------------------
     $modules = @{
-        "HostSummary"       = "Get-HostSummary"
-        "Services"          = "Get-LocalServices"
-        "Ports"             = "Get-ListeningPorts"
-        "Autostart"         = "Get-Autostart"
-        "FirewallRules"     = "Get-FirewallRules"
-        "ScheduledTasks"    = "Get-ScheduledTasks"
-        "Drivers"           = "Get-Drivers"
-        "BrowserExtensions" = "Get-BrowserExtensions"
+        HostSummary       = "Get-HostSummary"
+        Services          = "Get-LocalServices"
+        Ports             = "Get-ListeningPorts"
+        Autostart         = "Get-Autostart"
+        FirewallRules     = "Get-FirewallRules"
+        ScheduledTasks    = "Get-ScheduledTasks"
+        Drivers           = "Get-Drivers"
+        BrowserExtensions = "Get-BrowserExtensions"
     }
 
     if ($Include) {
-        $modules = $modules.GetEnumerator() |
-            Where-Object { $Include -contains $_.Key } |
-            ForEach-Object { $_ }
+        $modules = $modules.GetEnumerator() | Where-Object { $Include -contains $_.Key }
     }
 
-    # ----------------------------
-    # Run Enumerations
-    # ----------------------------
+    # -------------------------------------------------
+    # Run Enumeration
+    # -------------------------------------------------
     $results = @{}
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
 
@@ -66,97 +63,101 @@ function Invoke-Tempest {
             $fn = Get-Command $modules[$mod] -ErrorAction Stop
             $data = & $fn
             $results[$mod] = $data
-            $count = if ($data -is [System.Collections.IEnumerable]) { $data.Count } else { 1 }
-            Write-Host ("    -> Collected {0} items." -f $count) -ForegroundColor Green
+            Write-Host "    -> Collected $($data.Count) items." -ForegroundColor Green
         }
         catch {
-            Write-Warning ("[-] Failed running {0}: {1}" -f $mod, $_)
+            Write-Warning ("[-] Failed {0}: {1}" -f $mod, $_)
             $results[$mod] = @()
         }
     }
 
     $timer.Stop()
-    Write-Host ("`n[SUCCESS] Enumeration completed in {0}s" -f [math]::Round($timer.Elapsed.TotalSeconds,2)) -ForegroundColor Cyan
+    Write-Host "`n[SUCCESS] Enumeration completed in $([math]::Round($timer.Elapsed.TotalSeconds,2))s" -ForegroundColor Cyan
 
-    # ----------------------------
-    # EXPORT RESULTS VIA HELPERS
-    # ----------------------------
+    # -------------------------------------------------
+    # EXPORT RESULTS
+    # -------------------------------------------------
     Write-Host "[+] Exporting results..." -ForegroundColor Magenta
 
-    $jsonPath = Join-Path $OutDir "tempest_index.json"
-    $jsonOut  = Export-ToJson -Data $results -OutFile $jsonPath -Depth 8
-    $csvOuts  = Export-ToCsv -Report $results -OutDir $OutDir -FlattenCombined
-    $htmlOut  = Build-HtmlReport -Report $results -OutFile (Join-Path $OutDir "dashboard.html") -Title "T.E.M.P.E.S.T. Report"
+    $jsonOut = Export-ToJson `
+        -Data $results `
+        -OutFile (Join-Path $OutDir "tempest_index.json") `
+        -Depth 8
 
-    # ----------------------------
-    # RUN PYTHON AI ANALYSIS (Ports + Services)
-    # ----------------------------
-    Write-Host "[AI] Running intelligent post-analysis (ML risk scoring)..." -ForegroundColor Cyan
+    $csvOuts = Export-ToCsv -Report $results -OutDir $OutDir -FlattenCombined
 
-    $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-    $analysisDir = Join-Path $projectRoot "analysis"
+    $htmlOut = Build-HtmlReport `
+        -Report $results `
+        -OutFile (Join-Path $OutDir "dashboard.html") `
+        -Title "T.E.M.P.E.S.T. Report"
+
+    # -------------------------------------------------
+    # PATH RESOLUTION (ABSOLUTE)
+    # -------------------------------------------------
+    $projectRoot  = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+    $analysisDir  = Join-Path $projectRoot "analysis"
     $maliciousDir = Join-Path $projectRoot "malicious"
-    $modelRoot = Join-Path $analysisDir "models"
+    $modelRoot    = Join-Path $analysisDir "models"
 
-    if (!(Test-Path $modelRoot)) { New-Item -ItemType Directory -Path $modelRoot | Out-Null }
+    New-Item -ItemType Directory -Path $modelRoot -Force | Out-Null
 
-    # ----------------------------
-    # Ports Analysis
-    # ----------------------------
-    $portsCsv       = Join-Path $projectRoot "output\Ports.csv"
-    $portsTrainCsv  = Join-Path $maliciousDir "fakePorts.csv"
-    $portsPy        = Join-Path $analysisDir "ports_risk_pipeline.py"
-    $portsModelDir  = Join-Path $modelRoot "ports"
+    # -------------------------------------------------
+    # PORTS ML ANALYSIS (FIXED)
+    # -------------------------------------------------
+    $portsCsv      = (Resolve-Path (Join-Path $OutDir "Ports.csv")).Path
+    $portsTrainCsv = (Resolve-Path (Join-Path $maliciousDir "fakePorts.csv")).Path
+    $portsPy       = (Resolve-Path (Join-Path $analysisDir "ports_risk_pipeline.py")).Path
+    $portsModelDir = Join-Path $modelRoot "ports"
 
-    if ( (Test-Path $portsCsv) -and (Test-Path $portsPy) -and (Test-Path $portsTrainCsv) ) {
-        if (!(Test-Path $portsModelDir)) { New-Item -ItemType Directory -Path $portsModelDir | Out-Null }
-        Push-Location $analysisDir
+    if (Test-Path $portsCsv) {
+        New-Item -ItemType Directory -Path $portsModelDir -Force | Out-Null
+
         if (!(Test-Path (Join-Path $portsModelDir "ports_xgb.model"))) {
             Write-Host "[AI] Training Ports model..." -ForegroundColor Yellow
             python $portsPy train --data "$portsTrainCsv" --model_dir "$portsModelDir"
         }
+
         Write-Host "[AI] Scoring Ports..." -ForegroundColor Yellow
-        python $portsPy score --data "$portsCsv" --model_dir "$portsModelDir"
-        Pop-Location
-        Write-Host "[AI] Ports ML analysis complete." -ForegroundColor Green
-    }
-    else {
-        Write-Warning "[AI] Skipping Ports ML analysis (missing CSV or script)."
+        python $portsPy score `
+            --data "$portsCsv" `
+            --model_dir "$portsModelDir" `
+            --output "$(Join-Path $OutDir 'Ports_with_risk.csv')"
+
+        Write-Host "[AI] Ports ML complete." -ForegroundColor Green
     }
 
-    # ----------------------------
-    # Services Analysis
-    # ----------------------------
-    $servicesCsv       = Join-Path $projectRoot "output\Services.csv"
-    $servicesTrainCsv  = Join-Path $maliciousDir "fakeServices.csv"
-    $servicesPy        = Join-Path $analysisDir "services_risk_pipeline.py"
-    $servicesModelDir  = Join-Path $modelRoot "services"
+    # -------------------------------------------------
+    # SERVICES ML ANALYSIS (FIXED)
+    # -------------------------------------------------
+    $servicesCsv      = (Resolve-Path (Join-Path $OutDir "Services.csv")).Path
+    $servicesTrainCsv = (Resolve-Path (Join-Path $maliciousDir "fakeServices.csv")).Path
+    $servicesPy       = (Resolve-Path (Join-Path $analysisDir "services_risk_pipeline.py")).Path
+    $servicesModelDir = Join-Path $modelRoot "services"
 
-    if ( (Test-Path $servicesCsv) -and (Test-Path $servicesPy) -and (Test-Path $servicesTrainCsv) ) {
-        if (!(Test-Path $servicesModelDir)) { New-Item -ItemType Directory -Path $servicesModelDir | Out-Null }
-        Push-Location $analysisDir
+    if (Test-Path $servicesCsv) {
+        New-Item -ItemType Directory -Path $servicesModelDir -Force | Out-Null
+
         if (!(Test-Path (Join-Path $servicesModelDir "services_xgb.model"))) {
             Write-Host "[AI] Training Services model..." -ForegroundColor Yellow
             python $servicesPy train --data "$servicesTrainCsv" --model_dir "$servicesModelDir"
         }
+
         Write-Host "[AI] Scoring Services..." -ForegroundColor Yellow
-        python $servicesPy score --data "$servicesCsv" --model_dir "$servicesModelDir"
-        Pop-Location
-        Write-Host "[AI] Services ML analysis complete." -ForegroundColor Green
-    }
-    else {
-        Write-Warning "[AI] Skipping Services ML analysis (missing CSV or script)."
+        python $servicesPy score `
+            --data "$servicesCsv" `
+            --model_dir "$servicesModelDir"
+
+        Write-Host "[AI] Services ML complete." -ForegroundColor Green
     }
 
-    # ----------------------------
-    # Completion Output
-    # ----------------------------
-    Write-Host "`nReports saved to: $OutDir" -ForegroundColor Green
-    Write-Host "    $(Split-Path $jsonOut -Leaf)"
-    foreach ($csv in $csvOuts) { Write-Host "    $(Split-Path $csv -Leaf)" }
-    Write-Host "    $(Split-Path $htmlOut -Leaf)"
-    Write-Host "    Ports_with_risk.csv (if AI completed)"
-    Write-Host "    Services_with_risk.csv (if AI completed)"
+    # -------------------------------------------------
+    # FINAL OUTPUT
+    # -------------------------------------------------
+    Write-Host "`nReports saved to $OutDir" -ForegroundColor Green
+    $csvOuts | ForEach-Object { Write-Host "  - $(Split-Path $_ -Leaf)" }
+    Write-Host "  - dashboard.html"
+    Write-Host "  - Ports_with_risk.csv"
+    Write-Host "  - Services_with_risk.csv"
 
     return $results
 }
