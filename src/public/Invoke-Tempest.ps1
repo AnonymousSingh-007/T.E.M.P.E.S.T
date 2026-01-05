@@ -2,7 +2,7 @@ function Invoke-Tempest {
     <#
     .SYNOPSIS
         Launches the full T.E.M.P.E.S.T. local attack surface enumeration.
-        Includes ML-based port risk scoring via ports_risk_pipeline.py
+        Includes ML-based port + service risk scoring via Python pipelines.
     #>
 
     [CmdletBinding()]
@@ -89,58 +89,63 @@ function Invoke-Tempest {
     $htmlOut  = Build-HtmlReport -Report $results -OutFile (Join-Path $OutDir "dashboard.html") -Title "T.E.M.P.E.S.T. Report"
 
     # ----------------------------
-    # RUN PYTHON AI ANALYSIS (fixed paths)
+    # RUN PYTHON AI ANALYSIS (Ports + Services)
     # ----------------------------
-    Write-Host "[AI] Running intelligent post-analysis (port risk scoring)..." -ForegroundColor Cyan
+    Write-Host "[AI] Running intelligent post-analysis (ML risk scoring)..." -ForegroundColor Cyan
 
-    # Always resolve Ports.csv relative to the project root
     $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-    $portsCsv = Join-Path $projectRoot "output\Ports.csv"
+    $analysisDir = Join-Path $projectRoot "analysis"
+    $maliciousDir = Join-Path $projectRoot "malicious"
+    $modelRoot = Join-Path $analysisDir "models"
 
-    if (Test-Path $portsCsv) {
-        try {
-            $candidates = @(
-                (Join-Path $projectRoot "analysis\ports_risk_pipeline.py"),
-                (Join-Path $projectRoot "analysis\analyze_tempest.py")
-            )
+    if (!(Test-Path $modelRoot)) { New-Item -ItemType Directory -Path $modelRoot | Out-Null }
 
-            $scriptPath = $candidates | Where-Object { Test-Path $_ -PathType Leaf } | Select-Object -First 1
+    # ----------------------------
+    # Ports Analysis
+    # ----------------------------
+    $portsCsv       = Join-Path $projectRoot "output\Ports.csv"
+    $portsTrainCsv  = Join-Path $maliciousDir "fakePorts.csv"
+    $portsPy        = Join-Path $analysisDir "ports_risk_pipeline.py"
+    $portsModelDir  = Join-Path $modelRoot "ports"
 
-            if (-not $scriptPath) {
-                Write-Warning "[AI] Could not find ports_risk_pipeline.py in analysis folder."
-            }
-            else {
-                Write-Host "[AI] Using Python script: $scriptPath" -ForegroundColor Yellow
-                $analysisDir = Split-Path $scriptPath -Parent
-
-                Push-Location $analysisDir
-
-                # Ensure models directory exists
-                if (!(Test-Path ".\models")) {
-                    New-Item -ItemType Directory -Path ".\models" | Out-Null
-                }
-
-                # Train if model missing
-                if (!(Test-Path ".\models\ports_xgb.model")) {
-                    Write-Host "[AI] No trained model found. Training model first..." -ForegroundColor Yellow
-                    python $scriptPath train --data "$portsCsv"
-                }
-
-                Write-Host "[AI] Scoring ports with trained ML model..." -ForegroundColor Yellow
-                python $scriptPath score --data "$portsCsv"
-
-                Pop-Location
-
-                Write-Host "[AI] Port risk analysis complete. See Ports_with_risk.csv in output directory." -ForegroundColor Green
-            }
+    if ( (Test-Path $portsCsv) -and (Test-Path $portsPy) -and (Test-Path $portsTrainCsv) ) {
+        if (!(Test-Path $portsModelDir)) { New-Item -ItemType Directory -Path $portsModelDir | Out-Null }
+        Push-Location $analysisDir
+        if (!(Test-Path (Join-Path $portsModelDir "ports_xgb.model"))) {
+            Write-Host "[AI] Training Ports model..." -ForegroundColor Yellow
+            python $portsPy train --data "$portsTrainCsv" --model_dir "$portsModelDir"
         }
-        catch {
-            if (Get-Location | Out-Null) { Pop-Location }
-            Write-Warning "[AI] Failed to run Python ML analysis: $_"
-        }
+        Write-Host "[AI] Scoring Ports..." -ForegroundColor Yellow
+        python $portsPy score --data "$portsCsv" --model_dir "$portsModelDir"
+        Pop-Location
+        Write-Host "[AI] Ports ML analysis complete." -ForegroundColor Green
     }
     else {
-        Write-Warning "[AI] Skipping ML analysis -- Ports.csv not found at $portsCsv"
+        Write-Warning "[AI] Skipping Ports ML analysis (missing CSV or script)."
+    }
+
+    # ----------------------------
+    # Services Analysis
+    # ----------------------------
+    $servicesCsv       = Join-Path $projectRoot "output\Services.csv"
+    $servicesTrainCsv  = Join-Path $maliciousDir "fakeServices.csv"
+    $servicesPy        = Join-Path $analysisDir "services_risk_pipeline.py"
+    $servicesModelDir  = Join-Path $modelRoot "services"
+
+    if ( (Test-Path $servicesCsv) -and (Test-Path $servicesPy) -and (Test-Path $servicesTrainCsv) ) {
+        if (!(Test-Path $servicesModelDir)) { New-Item -ItemType Directory -Path $servicesModelDir | Out-Null }
+        Push-Location $analysisDir
+        if (!(Test-Path (Join-Path $servicesModelDir "services_xgb.model"))) {
+            Write-Host "[AI] Training Services model..." -ForegroundColor Yellow
+            python $servicesPy train --data "$servicesTrainCsv" --model_dir "$servicesModelDir"
+        }
+        Write-Host "[AI] Scoring Services..." -ForegroundColor Yellow
+        python $servicesPy score --data "$servicesCsv" --model_dir "$servicesModelDir"
+        Pop-Location
+        Write-Host "[AI] Services ML analysis complete." -ForegroundColor Green
+    }
+    else {
+        Write-Warning "[AI] Skipping Services ML analysis (missing CSV or script)."
     }
 
     # ----------------------------
@@ -151,6 +156,7 @@ function Invoke-Tempest {
     foreach ($csv in $csvOuts) { Write-Host "    $(Split-Path $csv -Leaf)" }
     Write-Host "    $(Split-Path $htmlOut -Leaf)"
     Write-Host "    Ports_with_risk.csv (if AI completed)"
+    Write-Host "    Services_with_risk.csv (if AI completed)"
 
     return $results
 }
