@@ -22,5 +22,5 @@ function Get-HostSummary {
         Domain       = $sys.Domain
     }
 
-    ,$info  
+    @($info)
 }
