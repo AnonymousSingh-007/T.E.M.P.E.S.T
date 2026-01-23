@@ -1,8 +1,12 @@
 function Export-ToCsv {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory)] [hashtable]$Report,
-        [Parameter(Mandatory)] [string]$OutDir,
+        [Parameter(Mandatory)]
+        [hashtable]$Report,
+
+        [Parameter(Mandatory)]
+        [string]$OutDir,
+
         [switch]$FlattenCombined
     )
 
@@ -13,46 +17,45 @@ function Export-ToCsv {
             New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
         }
 
-        $combinedPath   = Join-Path $OutDir "tempest_combined.csv"
-        $combinedExists = Test-Path $combinedPath
-
         foreach ($key in $Report.Keys) {
-            $path  = Join-Path $OutDir ("{0}.csv" -f $key)
             $items = @($Report[$key])
+            $path  = Join-Path $OutDir "$key.csv"
 
-            # Per-module CSV
             if ($items.Count -gt 0) {
-                $items | Export-Csv -Path $path -NoTypeInformation -Encoding UTF8
-                Write-Host ("    [OK] Exported {0}" -f (Split-Path $path -Leaf)) -ForegroundColor Green
+                $items | Export-Csv -Path $path -NoTypeInformation -Encoding UTF8 -Force
             }
             else {
                 "NoData" | Out-File -FilePath $path -Encoding UTF8
             }
 
+            Write-Host "    [OK] Exported $($key).csv" -ForegroundColor Green
             $csvFiles += $path
+        }
 
-            # Combined CSV (append-safe, schema-tolerant)
-            if ($FlattenCombined -and $items.Count -gt 0) {
-                $out = foreach ($item in $items) {
-                    $obj = $item.PSObject.Copy()
-                    $obj | Add-Member -NotePropertyName "Category" -NotePropertyValue $key -Force
-                    $obj
-                }
+        # ---- SAFE COMBINED CSV ----
+        if ($FlattenCombined) {
+            $flat = New-Object System.Collections.Generic.List[object]
 
-                if (-not $combinedExists) {
-                    $out | Export-Csv -Path $combinedPath -NoTypeInformation -Encoding UTF8
-                    $combinedExists = $true
+            foreach ($key in $Report.Keys) {
+                foreach ($item in @($Report[$key])) {
+                    if ($item) {
+                        $copy = $item.PSObject.Copy()
+                        $copy | Add-Member Category $key -Force
+                        $flat.Add($copy)
+                    }
                 }
-                else {
-                    $out | Export-Csv -Path $combinedPath -NoTypeInformation -Encoding UTF8 -Append -Force
-                }
+            }
 
-                Write-Host ("    [OK] Combined CSV: {0}" -f (Split-Path $combinedPath -Leaf)) -ForegroundColor Green
+            if ($flat.Count -gt 0) {
+                $combined = Join-Path $OutDir "tempest_combined.csv"
+                $flat | Export-Csv -Path $combined -NoTypeInformation -Encoding UTF8 -Force
+                Write-Host "    [OK] Combined CSV: tempest_combined.csv" -ForegroundColor Green
+                $csvFiles += $combined
             }
         }
     }
     catch {
-        Write-Warning ("[!] Export-ToCsv failed: {0}" -f $_)
+        Write-Warning "[!] Export-ToCsv failed: $_"
     }
 
     return $csvFiles

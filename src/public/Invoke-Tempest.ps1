@@ -1,143 +1,131 @@
+# ==============================
+# Script Root
+# ==============================
+$ScriptRoot = $PSScriptRoot
+
 function Invoke-Tempest {
     [CmdletBinding()]
-    param (
+    param(
         [string]$OutDir = ".\output",
         [string[]]$Include
     )
 
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    Write-Host "`n[INFO] Starting T.E.M.P.E.S.T" -ForegroundColor Cyan
 
-    Write-Host "`n[INFO] Initializing T.E.M.P.E.S.T. enumeration..." -ForegroundColor Cyan
+    # ---------------- OUTPUT ----------------
+    $OutDir = (New-Item -ItemType Directory -Force -Path $OutDir).FullName
 
-    # -------------------------------------------------
-    # NORMALIZE OUTPUT DIRECTORY (CRITICAL FIX)
-    # -------------------------------------------------
-    $OutDir = Resolve-Path (New-Item -ItemType Directory -Force -Path $OutDir)
-    $OutDir = $OutDir.Path
-    Write-Host "[DEBUG] Output directory: $OutDir" -ForegroundColor DarkCyan
+    # ---------------- PATHS ----------------
+    $helpersPath = Join-Path $ScriptRoot "..\Private\Helpers"
+    $privatePath = Join-Path $ScriptRoot "..\Private"
 
-    # -------------------------------------------------
-    # LOAD HELPERS / PRIVATE MODULES
-    # -------------------------------------------------
-    $helpersPath = Resolve-Path (Join-Path $PSScriptRoot "..\Private\Helpers")
-    foreach ($file in Get-ChildItem $helpersPath -Filter "*.ps1" -File) {
-        . $file.FullName
+    if (!(Test-Path $helpersPath)) { throw "Helpers path missing" }
+    if (!(Test-Path $privatePath)) { throw "Private path missing" }
+
+    # ---------------- LOAD HELPERS FIRST ----------------
+    Get-ChildItem $helpersPath -Filter "*.ps1" | ForEach-Object {
+        . $_.FullName
     }
 
-    $privatePath = Resolve-Path (Join-Path $PSScriptRoot "..\Private")
-    foreach ($file in Get-ChildItem $privatePath -Filter "Get-*.ps1" -File) {
-        . $file.FullName
+    Write-Diag "Helpers loaded"
+
+    # ---------------- LOAD MODULES ----------------
+    Get-ChildItem $privatePath -Filter "Get-*.ps1" | ForEach-Object {
+        . $_.FullName
+        Write-Diag "Loaded module: $($_.Name)"
     }
 
-    # -------------------------------------------------
-    # MODULE REGISTRY (ORDERED)
-    # -------------------------------------------------
-    $modules = [ordered]@{
-        HostSummary       = "Get-HostSummary"
-        Services          = "Get-LocalServices"
-        Ports             = "Get-ListeningPorts"
-        Autostart         = "Get-Autostart"
-        FirewallRules     = "Get-FirewallRules"
-        ScheduledTasks    = "Get-ScheduledTasks"
-        Drivers           = "Get-Drivers"
-        BrowserExtensions = "Get-BrowserExtensions"
+    Write-Diag "All modules loaded"
+    Write-Diag "Output directory: $OutDir"
+
+    # ---------------- MODULE REGISTRY ----------------
+    $allModules = [ordered]@{
+        HostSummary    = "Get-HostSummary"
+        Services       = "Get-LocalServices"
+        Ports          = "Get-ListeningPorts"
+        Autostart      = "Get-Autostart"
+        FirewallRules  = "Get-FirewallRules"
+        ScheduledTasks = "Get-ScheduledTasks"
     }
 
     if ($Include) {
-        $modules = [ordered]@{}
-        foreach ($k in $Include) {
-            if ($modules.Contains($k)) {
-                $modules[$k] = $modules[$k]
-            }
-        }
+        $modules = $allModules.GetEnumerator() |
+            Where-Object { $Include -contains $_.Key }
+    }
+    else {
+        $modules = $allModules.GetEnumerator()
     }
 
-    # -------------------------------------------------
-    # RESULTS (IN-MEMORY, SAFE)
-    # -------------------------------------------------
+    if (-not $modules) {
+        throw "No valid modules selected"
+    }
+
+    # ---------------- RUN ----------------
     $results = @{}
+    $globalTimer = [Diagnostics.Stopwatch]::StartNew()
 
-    # -------------------------------------------------
-    # JSON STREAM SETUP (SECONDARY OUTPUT)
-    # -------------------------------------------------
-    $jsonPath = Join-Path $OutDir "tempest_index.json"
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    $jsonStream = [System.IO.StreamWriter]::new($jsonPath, $false, $utf8NoBom)
-    $jsonStream.WriteLine("{")
+    foreach ($m in $modules) {
 
-    $moduleIndex = 0
-    $moduleCount = $modules.Count
-    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+        Write-Host "[*] Running $($m.Key)" -ForegroundColor Yellow
+        Write-Diag "Starting module $($m.Key)"
 
-    foreach ($mod in $modules.Keys) {
-        $moduleIndex++
-        Write-Host "[*] Running $mod enumeration..." -ForegroundColor Yellow
+        $moduleTimer = [Diagnostics.Stopwatch]::StartNew()
 
         try {
-            $fn = $modules[$mod]
-            if (-not (Get-Command $fn -ErrorAction SilentlyContinue)) {
-                throw "Function $fn not loaded"
+            if (-not (Get-Command $m.Value -ErrorAction SilentlyContinue)) {
+                throw "Function $($m.Value) not loaded"
             }
 
-            # ---------------- COLLECT ----------------
-            $data = @(& $fn)
-            Write-Host "    -> Collected $($data.Count) items." -ForegroundColor Green
+            # ---------- EXECUTE ----------
+            $raw = @(& $m.Value)
 
-            # store in memory (Option A)
-            $results[$mod] = $data
+            Write-Diag "$($m.Key): collected $($raw.Count) items"
 
-            # ---------------- STREAM JSON ----------------
-            $jsonStream.Write("  `"$mod`": [")
-
-            $first = $true
-            foreach ($item in $data) {
-                if (-not $first) { $jsonStream.Write(",") }
-                $first = $false
-                $jsonStream.Write(
-                    ($item | ConvertTo-Json -Depth 10 -Compress)
-                )
+            # ---------- SANITIZE ----------
+            if ($m.Key -eq "Autostart") {
+                $clean = $raw
+            }
+            else {
+                $clean = foreach ($r in $raw) {
+                    Convert-ToPlainObject $r
+                }
             }
 
-            $jsonStream.Write("]")
-            if ($moduleIndex -lt $moduleCount) { $jsonStream.WriteLine(",") }
-            else { $jsonStream.WriteLine() }
+            $results[$m.Key] = $clean
 
-            $jsonStream.Flush()
-
-            # ---------------- CSV (MODULE ONLY) ----------------
             Export-ToCsv `
-                -Report @{ $mod = $data } `
-                -OutDir $OutDir `
-                -FlattenCombined | Out-Null
+                -Report @{ $m.Key = $clean } `
+                -OutDir $OutDir | Out-Null
+
+            Write-Diag "$($m.Key): CSV exported"
         }
         catch {
-            Write-Warning ("[-] Failed {0}: {1}" -f $mod, $_)
+            Write-Warning "$($m.Key) failed: $_"
+            Write-Diag "$($m.Key) error: $_" "ERROR"
         }
         finally {
-            # HARD RELEASE
-            $data = $null
-            [GC]::Collect()
+            $moduleTimer.Stop()
+            Write-Diag "$($m.Key) finished in $([math]::Round($moduleTimer.Elapsed.TotalSeconds,2))s"
         }
     }
 
-    # ---------------- CLOSE JSON ----------------
-    $timer.Stop()
-    $jsonStream.WriteLine("}")
-    $jsonStream.Close()
+    # ---------------- COMBINED CSV ----------------
+    Export-ToCsv `
+        -Report $results `
+        -OutDir $OutDir `
+        -FlattenCombined | Out-Null
 
-    Write-Host "`n[SUCCESS] Enumeration completed in $([math]::Round($timer.Elapsed.TotalSeconds,2))s" -ForegroundColor Cyan
-    Write-Host "[OK] JSON index saved: $jsonPath" -ForegroundColor Green
+    Write-Diag "Combined CSV exported"
 
-    # -------------------------------------------------
-    # HTML REPORT (CORRECT PARAMS)
-    # -------------------------------------------------
-    if (Get-Command Build-HtmlReport -ErrorAction SilentlyContinue) {
-        Build-HtmlReport `
-            -Report $results `
-            -OutFile (Join-Path $OutDir "dashboard.html") | Out-Null
-    }
+    # ---------------- JSON ----------------
+    $jsonPath = Join-Path $OutDir "tempest_index.json"
+    $results | ConvertTo-Json -Depth 6 |
+        Out-File $jsonPath -Encoding UTF8
 
-    Write-Host "`nReports saved to $OutDir" -ForegroundColor Green
-    Write-Host "  - tempest_index.json"
-    Write-Host "  - dashboard.html"
+    Write-Diag "JSON written"
+
+    $globalTimer.Stop()
+    Write-Host "`n[SUCCESS] Completed in $([math]::Round($globalTimer.Elapsed.TotalSeconds,2))s" -ForegroundColor Green
+    Write-Diag "Run complete"
 }

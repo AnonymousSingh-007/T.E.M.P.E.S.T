@@ -2,55 +2,46 @@ function Export-ToJson {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
-        [hashtable] $Data,
+        [hashtable]$Data,
 
         [Parameter(Mandatory)]
-        [string] $OutFile,
+        [string]$OutFile,
 
-        [int] $Depth = 10
+        [int]$Depth = 6
     )
 
     try {
-        $dir = Split-Path -Path $OutFile -Parent
+        $dir = Split-Path $OutFile -Parent
         if (-not (Test-Path $dir)) {
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
         }
 
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        $stream    = [System.IO.StreamWriter]::new($OutFile, $false, $utf8NoBom)
+        # ---- SANITIZE OBJECTS (PS 5.1 CRITICAL) ----
+        $safe = @{}
 
-        $stream.WriteLine("{")
+        foreach ($key in $Data.Keys) {
+            $safe[$key] = foreach ($item in @($Data[$key])) {
+                if (-not $item) { continue }
 
-        $keys = $Data.Keys
-        $i = 0
-
-        foreach ($key in $keys) {
-            $i++
-
-            # Write property name
-            $stream.Write("  `"$key`": ")
-
-            # Serialize ONLY this section
-            $jsonPart = $Data[$key] | ConvertTo-Json -Depth $Depth -Compress
-
-            $stream.Write($jsonPart)
-
-            if ($i -lt $keys.Count) {
-                $stream.WriteLine(",")
+                $o = [ordered]@{}
+                foreach ($p in $item.PSObject.Properties) {
+                    if ($p.MemberType -in 'NoteProperty','Property') {
+                        try {
+                            $o[$p.Name] = $p.Value
+                        }
+                        catch {
+                            $o[$p.Name] = '[UNREADABLE]'
+                        }
+                    }
+                }
+                [pscustomobject]$o
             }
-            else {
-                $stream.WriteLine()
-            }
-
-            # FORCE flush to disk
-            $stream.Flush()
         }
 
-        $stream.WriteLine("}")
-        $stream.Flush()
-        $stream.Close()
+        $safe | ConvertTo-Json -Depth $Depth |
+            Out-File -Encoding UTF8 -Force $OutFile
 
-        Write-Host "    [OK] JSON report saved (streamed): $OutFile" -ForegroundColor Green
+        Write-Host "    [OK] JSON report saved: $OutFile" -ForegroundColor Green
         return (Resolve-Path $OutFile).Path
     }
     catch {
