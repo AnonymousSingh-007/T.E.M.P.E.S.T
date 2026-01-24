@@ -7,59 +7,186 @@ function Build-HtmlReport {
         [Parameter(Mandatory)]
         [string]$OutFile,
 
-        [string]$Title = "T.E.M.P.E.S.T."
+        [string]$Title = "T.E.M.P.E.S.T. Report"
     )
 
     Add-Type -AssemblyName System.Web
     function Encode($v) { [System.Web.HttpUtility]::HtmlEncode([string]$v) }
 
-    Write-Diag "Building HTML report"
-
     $sb = New-Object System.Text.StringBuilder
 
-    $null = $sb.AppendLine("<!DOCTYPE html>")
-    $null = $sb.AppendLine("<html><head><meta charset='utf-8'>")
-    $null = $sb.AppendLine("<title>$Title</title>")
-    $null = $sb.AppendLine("<style>")
-    $null = $sb.AppendLine("body{font-family:Segoe UI,Consolas;background:#0b0f14;color:#d0d6e0;padding:20px}")
-    $null = $sb.AppendLine("table{width:100%;border-collapse:collapse;font-size:13px}")
-    $null = $sb.AppendLine("th,td{padding:6px;border-bottom:1px solid #333}")
-    $null = $sb.AppendLine("th{color:#7a8599;text-align:left}")
-    $null = $sb.AppendLine("</style></head><body>")
-    $null = $sb.AppendLine("<h1>$Title</h1><hr/>")
-
-    foreach ($key in $Report.Keys) {
-        $items = @($Report[$key])
-
-        $null = $sb.AppendLine("<h2>$key ($($items.Count))</h2>")
-
-        if ($items.Count -eq 0) {
-            $null = $sb.AppendLine("<em>No data</em>")
-            continue
-        }
-
-        $cols = $items[0].PSObject.Properties.Name
-        $null = $sb.AppendLine("<table><tr>")
-
-        foreach ($c in $cols) {
-            $null = $sb.AppendLine("<th>$(Encode $c)</th>")
-        }
-
-        $null = $sb.AppendLine("</tr>")
-
-        foreach ($item in $items) {
-            $null = $sb.AppendLine("<tr>")
-            foreach ($c in $cols) {
-                $null = $sb.AppendLine("<td>$(Encode $item.$c)</td>")
-            }
-            $null = $sb.AppendLine("</tr>")
-        }
-
-        $null = $sb.AppendLine("</table><br/>")
+    # -------------------------------
+    # HTML + CSS
+    # -------------------------------
+    $null = $sb.AppendLine(@"
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset='utf-8'>
+<title>$Title</title>
+<style>
+    body {
+        font-family: Segoe UI, Consolas, monospace;
+        background: #0b0f14;
+        color: #d0d6e0;
+        padding: 20px;
     }
 
-    $null = $sb.AppendLine("</body></html>")
+    h1 {
+        margin-bottom: 10px;
+    }
+
+    .section {
+        margin-bottom: 25px;
+        border: 1px solid #1f2937;
+        border-radius: 6px;
+        overflow: hidden;
+        background: #0f1622;
+    }
+
+    .section-header {
+        padding: 10px 14px;
+        background: #111827;
+        cursor: pointer;
+        font-weight: 600;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .section-header:hover {
+        background: #1f2937;
+    }
+
+    .section-header span {
+        color: #9ca3af;
+        font-size: 12px;
+    }
+
+    .section-content {
+        display: none;
+        padding: 10px;
+    }
+
+    .section.open .section-content {
+        display: block;
+    }
+
+    .table-wrapper {
+        max-height: 450px;
+        overflow: auto;
+        border: 1px solid #1f2937;
+        border-radius: 4px;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }
+
+    th {
+        position: sticky;
+        top: 0;
+        background: #020617;
+        color: #7dd3fc;
+        text-align: left;
+        padding: 6px;
+        border-bottom: 1px solid #334155;
+        z-index: 2;
+    }
+
+    td {
+        padding: 6px;
+        border-bottom: 1px solid #1e293b;
+        vertical-align: top;
+    }
+
+    tr:hover td {
+        background: #020617;
+    }
+
+    em {
+        color: #9ca3af;
+    }
+
+    footer {
+        margin-top: 40px;
+        font-size: 11px;
+        color: #6b7280;
+    }
+</style>
+
+<script>
+function toggleSection(id) {
+    const el = document.getElementById(id);
+    el.classList.toggle('open');
+}
+</script>
+</head>
+<body>
+<h1>$Title</h1>
+<hr/>
+"@)
+
+    # -------------------------------
+    # SECTIONS
+    # -------------------------------
+    $i = 0
+    foreach ($key in $Report.Keys) {
+        $items = @($Report[$key])
+        $sectionId = "section_$i"
+        $count = $items.Count
+
+        $null = $sb.AppendLine("<div class='section' id='$sectionId'>")
+        $null = $sb.AppendLine("<div class='section-header' onclick=`"toggleSection('$sectionId')`">")
+        $null = $sb.AppendLine("<div>$key</div>")
+        $null = $sb.AppendLine("<span>$count items</span>")
+        $null = $sb.AppendLine("</div>")
+        $null = $sb.AppendLine("<div class='section-content'>")
+
+        if ($count -eq 0) {
+            $null = $sb.AppendLine("<em>No data</em>")
+        }
+        else {
+            $cols = $items[0].PSObject.Properties.Name
+
+            $null = $sb.AppendLine("<div class='table-wrapper'>")
+            $null = $sb.AppendLine("<table>")
+            $null = $sb.AppendLine("<thead><tr>")
+
+            foreach ($c in $cols) {
+                $null = $sb.AppendLine("<th>$(Encode $c)</th>")
+            }
+
+            $null = $sb.AppendLine("</tr></thead><tbody>")
+
+            foreach ($item in $items) {
+                $null = $sb.AppendLine("<tr>")
+                foreach ($c in $cols) {
+                    $null = $sb.AppendLine("<td>$(Encode $item.$c)</td>")
+                }
+                $null = $sb.AppendLine("</tr>")
+            }
+
+            $null = $sb.AppendLine("</tbody></table></div>")
+        }
+
+        $null = $sb.AppendLine("</div></div>")
+        $i++
+    }
+
+    # -------------------------------
+    # FOOTER
+    # -------------------------------
+    $null = $sb.AppendLine(@"
+<footer>
+Generated by T.E.M.P.E.S.T • $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+</footer>
+</body>
+</html>
+"@)
 
     $sb.ToString() | Out-File -Encoding UTF8 -Force $OutFile
-    Write-Diag "HTML report written to $OutFile"
+    Write-Host "[OK] HTML report generated → $OutFile" -ForegroundColor Green
 }
