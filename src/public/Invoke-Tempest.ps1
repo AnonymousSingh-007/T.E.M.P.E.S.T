@@ -1,131 +1,135 @@
-# ==============================
-# Script Root
-# ==============================
-$ScriptRoot = $PSScriptRoot
-
 function Invoke-Tempest {
     [CmdletBinding()]
-    param(
-        [string]$OutDir = ".\output",
-        [string[]]$Include
+    param (
+        [string]$OutDir = (Join-Path (Get-Location) "output")
     )
 
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-    Write-Host "`n[INFO] Starting T.E.M.P.E.S.T" -ForegroundColor Cyan
+    $start = Get-Date
+    Write-Host "[INFO] Starting T.E.M.P.E.S.T"
 
-    # ---------------- OUTPUT ----------------
-    $OutDir = (New-Item -ItemType Directory -Force -Path $OutDir).FullName
+    # -------------------------------------------------
+    # Resolve paths (THIS WAS THE CORE BUG)
+    # -------------------------------------------------
+    $basePath   = $PSScriptRoot
+    $helperPath = Join-Path $basePath "..\Private\Helpers"
+    $modulePath = Join-Path $basePath "..\Private"
+    $htmlFile   = Join-Path $basePath "..\Private\Helpers\Build-HtmlReport.ps1"
 
-    # ---------------- PATHS ----------------
-    $helpersPath = Join-Path $ScriptRoot "..\Private\Helpers"
-    $privatePath = Join-Path $ScriptRoot "..\Private"
+    # -------------------------------------------------
+    # Load helpers FIRST (Write-Diag lives here)
+    # -------------------------------------------------
+    if (-not (Test-Path $helperPath)) {
+        throw "Helpers directory not found: $helperPath"
+    }
 
-    if (!(Test-Path $helpersPath)) { throw "Helpers path missing" }
-    if (!(Test-Path $privatePath)) { throw "Private path missing" }
-
-    # ---------------- LOAD HELPERS FIRST ----------------
-    Get-ChildItem $helpersPath -Filter "*.ps1" | ForEach-Object {
+    Get-ChildItem $helperPath -Filter *.ps1 | ForEach-Object {
         . $_.FullName
     }
 
     Write-Diag "Helpers loaded"
 
-    # ---------------- LOAD MODULES ----------------
-    Get-ChildItem $privatePath -Filter "Get-*.ps1" | ForEach-Object {
+    # -------------------------------------------------
+    # Load HTML builder
+    # -------------------------------------------------
+    if (-not (Test-Path $htmlFile)) {
+        throw "Build-HtmlReport.ps1 not found"
+    }
+
+    . $htmlFile
+    Write-Diag "HTML report builder loaded"
+
+    # -------------------------------------------------
+    # Load modules
+    # -------------------------------------------------
+    if (-not (Test-Path $modulePath)) {
+        throw "Modules directory not found: $modulePath"
+    }
+
+    Get-ChildItem $modulePath -Filter *.ps1 | ForEach-Object {
         . $_.FullName
         Write-Diag "Loaded module: $($_.Name)"
     }
 
     Write-Diag "All modules loaded"
+
+    # -------------------------------------------------
+    # Output directory
+    # -------------------------------------------------
+    if (-not (Test-Path $OutDir)) {
+        New-Item -ItemType Directory -Path $OutDir | Out-Null
+    }
+
     Write-Diag "Output directory: $OutDir"
 
-    # ---------------- MODULE REGISTRY ----------------
-    $allModules = [ordered]@{
-        HostSummary    = "Get-HostSummary"
-        Services       = "Get-LocalServices"
-        Ports          = "Get-ListeningPorts"
-        Autostart      = "Get-Autostart"
-        FirewallRules  = "Get-FirewallRules"
-        ScheduledTasks = "Get-ScheduledTasks"
+    # -------------------------------------------------
+    # Module execution map
+    # -------------------------------------------------
+    $Report = @{}
+
+    $modules = @{
+        HostSummary    = { Get-HostSummary }
+        Services       = { Get-LocalServices }
+        Ports          = { Get-ListeningPorts }
+        Autostart      = { Get-Autostart }
+        FirewallRules  = { Get-FirewallRules }
+        ScheduledTasks = { Get-ScheduledTasks }
     }
 
-    if ($Include) {
-        $modules = $allModules.GetEnumerator() |
-            Where-Object { $Include -contains $_.Key }
-    }
-    else {
-        $modules = $allModules.GetEnumerator()
-    }
-
-    if (-not $modules) {
-        throw "No valid modules selected"
-    }
-
-    # ---------------- RUN ----------------
-    $results = @{}
-    $globalTimer = [Diagnostics.Stopwatch]::StartNew()
-
-    foreach ($m in $modules) {
-
-        Write-Host "[*] Running $($m.Key)" -ForegroundColor Yellow
-        Write-Diag "Starting module $($m.Key)"
-
-        $moduleTimer = [Diagnostics.Stopwatch]::StartNew()
+    foreach ($m in $modules.GetEnumerator()) {
+        Write-Host "[*] Running $($m.Key)"
+        $sw = [Diagnostics.Stopwatch]::StartNew()
 
         try {
-            if (-not (Get-Command $m.Value -ErrorAction SilentlyContinue)) {
-                throw "Function $($m.Value) not loaded"
-            }
-
-            # ---------- EXECUTE ----------
-            $raw = @(& $m.Value)
-
-            Write-Diag "$($m.Key): collected $($raw.Count) items"
-
-            # ---------- SANITIZE ----------
-            if ($m.Key -eq "Autostart") {
-                $clean = $raw
-            }
-            else {
-                $clean = foreach ($r in $raw) {
-                    Convert-ToPlainObject $r
-                }
-            }
-
-            $results[$m.Key] = $clean
-
-            Export-ToCsv `
-                -Report @{ $m.Key = $clean } `
-                -OutDir $OutDir | Out-Null
-
-            Write-Diag "$($m.Key): CSV exported"
+            Write-Diag "Starting module $($m.Key)"
+            $data = & $m.Value
+            $Report[$m.Key] = @($data)
+            Write-Diag "$($m.Key): collected $(@($data).Count) items"
         }
         catch {
-            Write-Warning "$($m.Key) failed: $_"
-            Write-Diag "$($m.Key) error: $_" "ERROR"
+            Write-Diag "$($m.Key) failed: $_" "ERROR"
+            $Report[$m.Key] = @()
         }
-        finally {
-            $moduleTimer.Stop()
-            Write-Diag "$($m.Key) finished in $([math]::Round($moduleTimer.Elapsed.TotalSeconds,2))s"
+
+        $csv = Join-Path $OutDir "$($m.Key).csv"
+        $Report[$m.Key] | Export-Csv -NoTypeInformation -Encoding UTF8 -Force $csv
+        Write-Host "    [OK] Exported $($m.Key).csv"
+        Write-Diag "$($m.Key): CSV exported"
+
+        $sw.Stop()
+        Write-Diag "$($m.Key) finished in $([math]::Round($sw.Elapsed.TotalSeconds,2))s"
+    }
+
+    # -------------------------------------------------
+    # Combined CSV
+    # -------------------------------------------------
+    $combined = foreach ($k in $Report.Keys) {
+        foreach ($row in $Report[$k]) {
+            $row | Add-Member Category $k -Force
+            $row
         }
     }
 
-    # ---------------- COMBINED CSV ----------------
-    Export-ToCsv `
-        -Report $results `
-        -OutDir $OutDir `
-        -FlattenCombined | Out-Null
-
+    $combinedCsv = Join-Path $OutDir "tempest_combined.csv"
+    $combined | Export-Csv -NoTypeInformation -Encoding UTF8 -Force $combinedCsv
     Write-Diag "Combined CSV exported"
 
-    # ---------------- JSON ----------------
-    $jsonPath = Join-Path $OutDir "tempest_index.json"
-    $results | ConvertTo-Json -Depth 6 |
-        Out-File $jsonPath -Encoding UTF8
-
+    # -------------------------------------------------
+    # JSON
+    # -------------------------------------------------
+    $jsonFile = Join-Path $OutDir "tempest_report.json"
+    $Report | ConvertTo-Json -Depth 5 | Out-File -Encoding UTF8 -Force $jsonFile
     Write-Diag "JSON written"
 
-    $globalTimer.Stop()
-    Write-Host "`n[SUCCESS] Completed in $([math]::Round($globalTimer.Elapsed.TotalSeconds,2))s" -ForegroundColor Green
+    # -------------------------------------------------
+    # HTML
+    # -------------------------------------------------
+    $htmlOut = Join-Path $OutDir "tempest_report.html"
+    Build-HtmlReport -Report $Report -OutFile $htmlOut -Title "T.E.M.P.E.S.T. System Enumeration"
+
+    # -------------------------------------------------
+    # Done
+    # -------------------------------------------------
+    $elapsed = (Get-Date) - $start
+    Write-Host "`n[SUCCESS] Completed in $([math]::Round($elapsed.TotalSeconds,2))s" -ForegroundColor Green
     Write-Diag "Run complete"
 }

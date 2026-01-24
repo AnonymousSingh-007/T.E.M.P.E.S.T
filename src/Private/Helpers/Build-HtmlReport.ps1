@@ -13,6 +13,8 @@ function Build-HtmlReport {
     Add-Type -AssemblyName System.Web
     function Encode($v) { [System.Web.HttpUtility]::HtmlEncode([string]$v) }
 
+    Write-Diag "Building HTML report"
+
     $sb = New-Object System.Text.StringBuilder
 
     $null = $sb.AppendLine("<!DOCTYPE html>")
@@ -59,5 +61,5 @@ function Build-HtmlReport {
     $null = $sb.AppendLine("</body></html>")
 
     $sb.ToString() | Out-File -Encoding UTF8 -Force $OutFile
-    Write-Host "[OK] HTML report generated → $OutFile" -ForegroundColor Green
+    Write-Diag "HTML report written to $OutFile"
 }
