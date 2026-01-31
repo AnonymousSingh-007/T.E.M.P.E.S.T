@@ -13,6 +13,14 @@ function Build-HtmlReport {
     Add-Type -AssemblyName System.Web
     function Encode($v) { [System.Web.HttpUtility]::HtmlEncode([string]$v) }
 
+    function Get-RiskClass($value) {
+        if ($null -eq $value) { return "" }
+        if ($value -ge 80) { return "risk-critical" }
+        elseif ($value -ge 60) { return "risk-high" }
+        elseif ($value -ge 40) { return "risk-medium" }
+        else { return "risk-low" }
+    }
+
     $sb = New-Object System.Text.StringBuilder
 
     # -------------------------------
@@ -32,9 +40,7 @@ function Build-HtmlReport {
         padding: 20px;
     }
 
-    h1 {
-        margin-bottom: 10px;
-    }
+    h1 { margin-bottom: 10px; }
 
     .section {
         margin-bottom: 25px;
@@ -54,23 +60,15 @@ function Build-HtmlReport {
         align-items: center;
     }
 
-    .section-header:hover {
-        background: #1f2937;
-    }
+    .section-header:hover { background: #1f2937; }
 
     .section-header span {
         color: #9ca3af;
         font-size: 12px;
     }
 
-    .section-content {
-        display: none;
-        padding: 10px;
-    }
-
-    .section.open .section-content {
-        display: block;
-    }
+    .section-content { display: none; padding: 10px; }
+    .section.open .section-content { display: block; }
 
     .table-wrapper {
         max-height: 450px;
@@ -102,13 +100,15 @@ function Build-HtmlReport {
         vertical-align: top;
     }
 
-    tr:hover td {
-        background: #020617;
-    }
+    tr:hover td { background: #020617; }
 
-    em {
-        color: #9ca3af;
-    }
+    /* Risk coloring */
+    .risk-critical { background-color: #7f1d1d !important; color: #fee2e2; font-weight: bold; }
+    .risk-high     { background-color: #78350f !important; color: #ffedd5; }
+    .risk-medium   { background-color: #713f12 !important; color: #fef9c3; }
+    .risk-low      { background-color: #064e3b !important; color: #d1fae5; }
+
+    em { color: #9ca3af; }
 
     footer {
         margin-top: 40px;
@@ -119,8 +119,7 @@ function Build-HtmlReport {
 
 <script>
 function toggleSection(id) {
-    const el = document.getElementById(id);
-    el.classList.toggle('open');
+    document.getElementById(id).classList.toggle('open');
 }
 </script>
 </head>
@@ -151,20 +150,31 @@ function toggleSection(id) {
         else {
             $cols = $items[0].PSObject.Properties.Name
 
-            $null = $sb.AppendLine("<div class='table-wrapper'>")
-            $null = $sb.AppendLine("<table>")
-            $null = $sb.AppendLine("<thead><tr>")
+            # Detect score column
+            $scoreCol = $cols | Where-Object { $_ -match 'RiskScore|AnomalyScore|Score' } | Select-Object -First 1
 
+            if ($scoreCol) {
+                $items = $items | Sort-Object { [double]($_.$scoreCol) } -Descending
+            }
+
+            $null = $sb.AppendLine("<div class='table-wrapper'><table>")
+            $null = $sb.AppendLine("<thead><tr>")
             foreach ($c in $cols) {
                 $null = $sb.AppendLine("<th>$(Encode $c)</th>")
             }
-
             $null = $sb.AppendLine("</tr></thead><tbody>")
 
             foreach ($item in $items) {
                 $null = $sb.AppendLine("<tr>")
                 foreach ($c in $cols) {
-                    $null = $sb.AppendLine("<td>$(Encode $item.$c)</td>")
+                    $value = $item.$c
+                    $cls = ""
+
+                    if ($c -eq $scoreCol) {
+                        $cls = Get-RiskClass ([double]$value)
+                    }
+
+                    $null = $sb.AppendLine("<td class='$cls'>$(Encode $value)</td>")
                 }
                 $null = $sb.AppendLine("</tr>")
             }
