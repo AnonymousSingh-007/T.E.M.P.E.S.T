@@ -14,6 +14,7 @@ function Invoke-Tempest {
     $helperPath = Join-Path $basePath "..\Private\Helpers"
     $modulePath = Join-Path $basePath "..\Private"
     $htmlFile   = Join-Path $basePath "..\Private\Helpers\Build-HtmlReport.ps1"
+    $analysisPath = Join-Path $basePath "..\..\analysis\anomaly"
 
     # -------------------------------------------------
     # Load helpers & modules
@@ -43,7 +44,7 @@ function Invoke-Tempest {
     }
 
     # -------------------------------------------------
-    # Run modules
+    # Run collection modules
     # -------------------------------------------------
     $Report = @{}
     $modules = @{
@@ -66,27 +67,51 @@ function Invoke-Tempest {
     }
 
     # -------------------------------------------------
-    # Ports ML Anomaly Detection
+    # ML Anomaly Detection (Ports, Services, Autostart)
     # -------------------------------------------------
     if ($PythonExe) {
-        $portsCsv = Join-Path $OutDir "Ports.csv"
-        $portsOut = Join-Path $OutDir "Ports_with_anomaly.csv"
-        $mlScript = Join-Path $basePath "..\..\analysis\anomaly\ports_anomaly.py"
 
-        if ((Test-Path $portsCsv) -and (Test-Path $mlScript)) {
-            Write-Host "[*] Running Ports anomaly detection"
+        $mlJobs = @(
+            @{
+                Name   = "Ports"
+                Input  = "Ports.csv"
+                Output = "Ports_with_anomaly.csv"
+                Script = "ports_anomaly.py"
+            },
+            @{
+                Name   = "Services"
+                Input  = "Services.csv"
+                Output = "Services_with_anomaly.csv"
+                Script = "services_anomaly.py"
+            },
+            @{
+                Name   = "Autostart"
+                Input  = "Autostart.csv"
+                Output = "Autostart_with_anomaly.csv"
+                Script = "autostart_anomaly.py"
+            }
+        )
 
-            & $PythonExe $mlScript --input $portsCsv --output $portsOut
+        foreach ($job in $mlJobs) {
+            $inputCsv  = Join-Path $OutDir $job.Input
+            $outputCsv = Join-Path $OutDir $job.Output
+            $scriptPy  = Join-Path $analysisPath $job.Script
 
-            if ($LASTEXITCODE -eq 0) {
-                Write-Diag "Ports anomaly analysis complete"
+            if ((Test-Path $inputCsv) -and (Test-Path $scriptPy)) {
+                Write-Host "[*] Running $($job.Name) anomaly detection"
+
+                & $PythonExe $scriptPy --input $inputCsv --output $outputCsv
+
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Diag "$($job.Name) anomaly analysis complete"
+                }
+                else {
+                    Write-Diag "$($job.Name) anomaly analysis failed" "ERROR"
+                }
             }
             else {
-                Write-Diag "Ports anomaly analysis failed" "ERROR"
+                Write-Diag "$($job.Name) ML skipped (missing CSV or script)" "WARN"
             }
-        }
-        else {
-            Write-Diag "Ports ML skipped (missing CSV or script)" "WARN"
         }
     }
 
@@ -112,6 +137,9 @@ function Invoke-Tempest {
     $htmlOut = Join-Path $OutDir "tempest_report.html"
     Build-HtmlReport -Report $Report -OutFile $htmlOut -Title "T.E.M.P.E.S.T. System Enumeration"
 
+    # -------------------------------------------------
+    # Done
+    # -------------------------------------------------
     $elapsed = (Get-Date) - $start
     Write-Host "`n[SUCCESS] Completed in $([math]::Round($elapsed.TotalSeconds,2))s" -ForegroundColor Green
     Write-Diag "Run complete"
